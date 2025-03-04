@@ -1,0 +1,9 @@
+api_endpoint: http://192.168.10.2:9090
+api_key: gbU-k7v-r9B-hUy
+include_regex: "香港"
+exclude_regex: "10(\\.0)?x|5(\\.0)?x|3(\\.0)x"
+test_url: https://www.google.com
+retrieve_interval: 3600 # 每小时更新一次节点列表
+current_interval: 300 # 对当前节点每5分钟测速一次
+best_interval: 1800 # 对所有节点每半小时测速一次，选出最优节点
+test_times: 3 # 每次测速取平均值
