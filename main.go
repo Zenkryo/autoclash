@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -42,6 +43,7 @@ type ProxiesResponse struct {
 var gNodes []string
 var gCurrent string
 var gConfig *Config
+var gBest string
 
 // 加载配置文件
 func loadConfig(filePath string) (*Config, error) {
@@ -129,7 +131,7 @@ func filterNodes(nodes []string) ([]string, error) {
 	return filtered, nil
 }
 
-// 测试节点延迟，返回延迟时间（毫秒），如果不可用返回 -1
+// 并行测试节点延迟
 func testNode(nodeName string) int {
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/proxies/%s/delay?url=%s&timeout=5000", gConfig.APIEndpoint, nodeName, gConfig.TestURL), nil)
@@ -186,52 +188,128 @@ func switchNode(nodenName string) error {
 }
 
 // 选择最快的节点
-func selectFastestNode() (string, error) {
-	bestNode := ""
-	bestLatency := -1
+func selectFastestNode() (string, int, error) {
+	var wg sync.WaitGroup
+	type result struct {
+		node    string
+		latency int
+	}
+	results := make(chan result, len(gNodes))
 
 	for _, node := range gNodes {
-		totalLatency := 0
-		successCount := 0
-		for i := 0; i < gConfig.TestTimes; i++ {
-			latency := testNode(node)
-			if latency > 0 {
-				totalLatency += latency
-				successCount++
+		wg.Add(1)
+		go func(node string) {
+			defer wg.Done()
+			totalLatency := 0
+			successCount := 0
+			for i := 0; i < gConfig.TestTimes; i++ {
+				latency := testNode(node)
+				if latency > 0 {
+					totalLatency += latency
+					successCount++
+				}
+				time.Sleep(1 * time.Second) // 避免过于频繁测试
 			}
-			time.Sleep(1 * time.Second) // 避免过于频繁测试
-		}
-		if successCount > 0 {
-			avgLatency := totalLatency / successCount
-			println(node, avgLatency)
-			if bestLatency == -1 || avgLatency < bestLatency {
-				bestLatency = avgLatency
-				bestNode = node
+			if successCount > 0 {
+				avgLatency := totalLatency / successCount
+				results <- result{node: node, latency: avgLatency}
+				log.Printf("节点 %s 延迟: %d", node, avgLatency)
 			}
+		}(node)
+	}
+
+	wg.Wait()
+	close(results)
+
+	bestNode := ""
+	bestLatency := -1
+	for res := range results {
+		if bestLatency == -1 || res.latency < bestLatency {
+			bestLatency = res.latency
+			bestNode = res.node
 		}
 	}
 
 	if bestNode == "" {
-		return "", fmt.Errorf("没有可用节点")
+		return "", 0, fmt.Errorf("没有可用节点")
 	}
-	return bestNode, nil
+	return bestNode, bestLatency, nil
 }
 
+// 定时更新节点列表
+func startNodeUpdater() {
+	ticker := time.NewTicker(time.Duration(gConfig.RetrieveInterval) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		nodes, current, err := getNodes()
+		if err != nil {
+			log.Printf("更新节点列表失败: %v", err)
+			continue
+		} else {
+			log.Printf("更新节点列表成功: %v", nodes)
+		}
+		gNodes = nodes
+		gCurrent = current
+	}
+}
+
+// 定时选择最优节点
+func startBestNodeSelector() {
+	ticker := time.NewTicker(time.Duration(gConfig.BestInterval) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		bestNode, latency, err := selectFastestNode()
+		if err != nil {
+			log.Printf("选择最优节点失败: %v", err)
+			continue
+		} else {
+			gBest = bestNode
+			log.Printf("最优节点: %s, 延迟: %d", bestNode, latency)
+		}
+	}
+}
+
+// 定时检查当前节点是否可用
+func startCurrentNodeChecker() {
+	var err error
+	ticker := time.NewTicker(time.Duration(gConfig.CurrentInterval) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if testNode(gCurrent) == -1 {
+			if gBest == "" || gBest == gCurrent {
+				log.Printf("当前节点不可用，切换到最优节点")
+				gBest, _, err = selectFastestNode()
+				if err != nil {
+					log.Printf("选择最优节点失败: %v", err)
+					continue
+				}
+			}
+			err = switchNode(gBest)
+			if err != nil {
+				log.Printf("切换节点失败: %v", err)
+			} else {
+				gCurrent = gBest
+			}
+		}
+	}
+}
 func main() {
 	var err error
-	var configFile string
-	configFile = "config.yaml"
-	gConfig, err = loadConfig(configFile)
+	gConfig, err = loadConfig("config.yaml")
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 	gNodes, gCurrent, err = getNodes()
 	if err != nil {
 		log.Fatalf("获取节点失败: %v", err)
+	} else {
+		log.Printf("获取节点成功: %v", gNodes)
+		log.Println("当前节点: ", gCurrent)
 	}
-	testNode(gCurrent)
-	_, err = selectFastestNode()
-	if err != nil {
-		log.Fatalf("选择最快节点失败: %v", err)
-	}
+
+	go startNodeUpdater()
+	go startBestNodeSelector()
+	go startCurrentNodeChecker()
+
+	select {} // 阻塞主协程
 }
