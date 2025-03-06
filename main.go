@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -66,7 +67,7 @@ func loadConfig(filePath string) (*Config, error) {
 // 获取节点流量系数
 func getFlow(nodeName string) float64 {
 	// 从节点名中提取流量系数， 名字中含有(d.dx)或(dx)的格式或者dx的格式, 例如1.0x, 1.5x, 2.0x或1x,2x
-	re := regexp.MustCompile(`\((\d+\.\d+)x\)|(\d+)x`)
+	re := regexp.MustCompile(`(\d+\.\d+)x|(\d+)x`)
 	matches := re.FindStringSubmatch(nodeName)
 	if len(matches) == 0 {
 		return 1.0
@@ -228,7 +229,7 @@ func switchNode(node *ProxyNode) error {
 	return nil
 }
 
-// 选择最快的节点
+// 选择最优的节点
 func selectFastestNode() (*ProxyNode, error) {
 	var wg sync.WaitGroup
 
@@ -257,19 +258,48 @@ func selectFastestNode() (*ProxyNode, error) {
 
 	wg.Wait()
 
-	var bestNode *ProxyNode
-	bestLatency := -1
-	for _, node := range gNodes {
-		if bestLatency == -1 || node.Latency < bestLatency {
-			bestLatency = node.Latency
-			bestNode = node
-		}
+	// 按流量系数分组节点
+	nodeGroups := make(map[float64][]*ProxyNode)
+	for i := range gNodes {
+		node := gNodes[i]
+		nodeGroups[node.Flow] = append(nodeGroups[node.Flow], node)
 	}
 
-	if bestNode == nil {
-		return nil, fmt.Errorf("没有可用节点")
+	// 获取所有流量系数并排序
+	var flowKeys []float64
+	for flow := range nodeGroups {
+		flowKeys = append(flowKeys, flow)
 	}
-	return bestNode, nil
+	sort.Float64s(flowKeys)
+
+	latencyThreshold := gConfig.LatencyThreshold
+	for {
+		for _, flow := range flowKeys {
+			nodes := nodeGroups[flow]
+			var bestNode *ProxyNode
+			bestLatency := -1
+			for i := range nodes {
+				node := nodes[i]
+				if node.Latency > 0 && node.Latency <= latencyThreshold {
+					if bestLatency == -1 || node.Latency < bestLatency {
+						bestLatency = node.Latency
+						bestNode = node
+					}
+				}
+			}
+
+			if bestNode != nil {
+				return bestNode, nil
+			}
+		}
+
+		// 如果没有找到满足条件的节点，增加延迟阈值
+		latencyThreshold += gConfig.LatencyThreshold / 10
+		if latencyThreshold > gConfig.LatencyThreshold*2 {
+			break
+		}
+	}
+	return nil, fmt.Errorf("没有找到合适的节点")
 }
 
 // 定时更新节点列表
@@ -318,7 +348,8 @@ func startCurrentNodeChecker() {
 	defer ticker.Stop()
 	for range ticker.C {
 		mu.Lock()
-		if testNode(gCurrent) == -1 {
+		delay := testNode(gCurrent)
+		if delay == -1 || delay > gConfig.LatencyThreshold*2 {
 			if gBest == nil || gBest == gCurrent {
 				log.Printf("当前节点不可用，切换到最优节点")
 				gBest, err = selectFastestNode()
@@ -332,6 +363,7 @@ func startCurrentNodeChecker() {
 			if err != nil {
 				log.Printf("切换节点失败: %v", err)
 			} else {
+				log.Printf("切换节点成功: %s", gBest.Name)
 				gCurrent = gBest
 			}
 		}
