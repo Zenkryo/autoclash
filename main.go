@@ -8,9 +8,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +62,16 @@ func loadConfig(filePath string) (*Config, error) {
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		return nil, fmt.Errorf("解析配置文件失败: %v", err)
+	}
+	v := reflect.ValueOf(&config).Elem()
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		field := t.Field(i)
+		envName := "AUTOCLASH_" + strings.ToUpper(field.Name)
+		envValue := os.Getenv(envName)
+		if envValue != "" {
+			v.Field(i).SetString(envValue)
+		}
 	}
 	return &config, nil
 }
@@ -349,6 +361,9 @@ func startCurrentNodeChecker() {
 	for range ticker.C {
 		mu.Lock()
 		delay := testNode(gCurrent)
+		if delay != -1 {
+			log.Printf("当前节点: %s, 延迟: %d", gCurrent.Name, delay)
+		}
 		if delay == -1 || delay > gConfig.LatencyThreshold*2 {
 			if gBest == nil || gBest == gCurrent {
 				log.Printf("当前节点不可用，切换到最优节点")
@@ -373,7 +388,7 @@ func startCurrentNodeChecker() {
 
 func main() {
 	var err error
-	gConfig, err = loadConfig("config.yaml")
+	gConfig, err = loadConfig("config.yml")
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}

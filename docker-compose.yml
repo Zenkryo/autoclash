@@ -1,0 +1,14 @@
+services:
+  autoclash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: autoclash
+    working_dir: /app
+    container_name: autoclash
+    network_mode: host
+    volumes:
+      - ./config.yml:/app/config.yml
+    environment:
+      - AUTOCLASH_APIENDPOINT=http://192.168.10.2:9090
+      - AUTOCLASH_APIKEY=gbU-k7v-r9B-hUy
