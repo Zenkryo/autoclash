@@ -47,6 +47,7 @@ var gConfig *Config
 var gNodes []*ProxyNode
 var gCurrent *ProxyNode
 var gBest *ProxyNode
+var mu sync.Mutex
 
 // 加载配置文件
 func loadConfig(filePath string) (*Config, error) {
@@ -220,7 +221,7 @@ func switchNode(node *ProxyNode) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode > 299 || resp.StatusCode < 200 {
 		return fmt.Errorf("切换节点失败，状态码: %d", resp.StatusCode)
 	}
 
@@ -238,7 +239,7 @@ func selectFastestNode() (*ProxyNode, error) {
 			defer wg.Done()
 			totalLatency := 0
 			successCount := 0
-			for i := 0; i < gConfig.TestTimes; i++ {
+			for range gConfig.TestTimes {
 				latency := testNode(node)
 				if latency > 0 {
 					totalLatency += latency
@@ -248,7 +249,6 @@ func selectFastestNode() (*ProxyNode, error) {
 			}
 			if successCount > 0 {
 				node.Latency = totalLatency / successCount
-				log.Printf("节点 %s 延迟: %d", node.Name, node.Latency)
 			} else {
 				node.Latency = -1
 			}
@@ -277,20 +277,18 @@ func startNodeUpdater() {
 	ticker := time.NewTicker(time.Duration(gConfig.RetrieveInterval) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		mu.Lock()
 		nodes, current, err := getNodes()
 		if err != nil {
 			log.Printf("更新节点列表失败: %v", err)
+			mu.Unlock()
 			continue
 		} else {
-			// log print name of all nodes
-			for i := range nodes {
-				node := nodes[i]
-				log.Println("节点: ", node.Name)
-			}
-			log.Println("当前节点: ", current)
+			log.Println("更新节点列表成功")
 		}
 		gNodes = nodes
 		gCurrent = current
+		mu.Unlock()
 	}
 }
 
@@ -299,14 +297,17 @@ func startBestNodeSelector() {
 	ticker := time.NewTicker(time.Duration(gConfig.BestInterval) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		mu.Lock()
 		bestNode, err := selectFastestNode()
 		if err != nil {
 			log.Printf("选择最优节点失败: %v", err)
+			mu.Unlock()
 			continue
 		} else {
 			gBest = bestNode
 			log.Printf("最优节点: %s, 延迟: %d", bestNode.Name, bestNode.Latency)
 		}
+		mu.Unlock()
 	}
 }
 
@@ -316,12 +317,14 @@ func startCurrentNodeChecker() {
 	ticker := time.NewTicker(time.Duration(gConfig.CurrentInterval) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		mu.Lock()
 		if testNode(gCurrent) == -1 {
 			if gBest == nil || gBest == gCurrent {
 				log.Printf("当前节点不可用，切换到最优节点")
 				gBest, err = selectFastestNode()
 				if err != nil {
 					log.Printf("选择最优节点失败: %v", err)
+					mu.Unlock()
 					continue
 				}
 			}
@@ -332,21 +335,16 @@ func startCurrentNodeChecker() {
 				gCurrent = gBest
 			}
 		}
+		mu.Unlock()
 	}
 }
+
 func main() {
 	var err error
 	gConfig, err = loadConfig("config.yaml")
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
-	// gNodes, gCurrent, err = getNodes()
-	// if err != nil {
-	// 	log.Fatalf("获取节点失败: %v", err)
-	// } else {
-	// 	log.Printf("获取节点成功: %v", gNodes)
-	// 	log.Println("当前节点: ", gCurrent)
-	// }
 
 	go startNodeUpdater()
 	go startBestNodeSelector()
