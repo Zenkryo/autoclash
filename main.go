@@ -162,7 +162,7 @@ func testNode(nodeName string) int {
 }
 
 // 切换到指定节点
-func switchNode(nodenName string) error {
+func switchNode(nodeName string) error {
 	client := &http.Client{}
 	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/proxies/%s", gConfig.APIEndpoint, gConfig.SelectNode), nil)
 	if err != nil {
@@ -170,7 +170,7 @@ func switchNode(nodenName string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+gConfig.APIKey)
-	payload := nodenName
+	payload := map[string]string{"name": nodeName}
 	jsonPayload, _ := json.Marshal(payload)
 	req.Body = io.NopCloser(bytes.NewReader(jsonPayload))
 
