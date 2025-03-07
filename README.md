@@ -14,7 +14,7 @@
 
 ## 配置文件
 
-配置文件 `config.yaml` 示例：
+配置文件 `config.yml` 示例：
 
 ```yaml
 api_endpoint: "http://localhost:9090"  # ClashX API 地址
@@ -41,10 +41,10 @@ latency_threshold: 250                 # 延迟阈值（毫秒）
    cd autoclash
    ```
 
-2. 创建并编辑配置文件 `config.yaml`：
+2. 创建并编辑配置文件 `config.yml`：
 
    ```sh
-   nano config.yaml
+   nano config.yml
    ```
 
 3. 运行程序：
@@ -119,7 +119,7 @@ latency_threshold: 250                 # 延迟阈值（毫秒）
 ## 注意事项
 
 - 请确保 ClashX 已经启动并正确配置 API。
-- 请根据实际情况修改 `config.yaml` 中的配置项。
+- 请根据实际情况修改 `config.yml` 中的配置项。
 - 运行程序时，请确保网络连接正常。
 
 ## 许可证
