@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,7 +66,7 @@ func loadConfig(filePath string) (*Config, error) {
 	}
 	v := reflect.ValueOf(&config).Elem()
 	t := v.Type()
-	for i := 0; i < v.NumField(); i++ {
+	for i := range v.NumField() {
 		field := t.Field(i)
 		envName := "AUTOCLASH_" + strings.ToUpper(field.Name)
 		envValue := os.Getenv(envName)
@@ -318,19 +319,26 @@ func selectFastestNode() (*ProxyNode, error) {
 func startNodeUpdater() {
 	ticker := time.NewTicker(time.Duration(gConfig.RetrieveInterval) * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
 		mu.Lock()
 		nodes, current, err := getNodes()
 		if err != nil {
 			log.Printf("更新节点列表失败: %v", err)
 			mu.Unlock()
+			time.Sleep(10 * time.Second)
 			continue
-		} else {
-			log.Println("更新节点列表成功")
 		}
+		if len(nodes) == 0 {
+			log.Println("节点列表为空，立即重试")
+			mu.Unlock()
+			time.Sleep(10 * time.Second)
+			continue
+		}
+		log.Println("更新节点列表成功")
 		gNodes = nodes
 		gCurrent = current
 		mu.Unlock()
+		<-ticker.C
 	}
 }
 
@@ -338,18 +346,23 @@ func startNodeUpdater() {
 func startBestNodeSelector() {
 	ticker := time.NewTicker(time.Duration(gConfig.BestInterval) * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
 		mu.Lock()
-		bestNode, err := selectFastestNode()
-		if err != nil {
-			log.Printf("选择最优节点失败: %v", err)
-			mu.Unlock()
-			continue
-		} else {
-			gBest = bestNode
-			log.Printf("最优节点: %s, 延迟: %d", bestNode.Name, bestNode.Latency)
+		if len(gNodes) > 0 && gBest == nil {
+			log.Println("最优节点为空，立即选择最优节点")
+			bestNode, err := selectFastestNode()
+			if err != nil {
+				log.Printf("选择最优节点失败: %v", err)
+				mu.Unlock()
+				time.Sleep(10 * time.Second)
+				continue
+			} else {
+				gBest = bestNode
+				log.Printf("最优节点: %s, 延迟: %d", bestNode.Name, bestNode.Latency)
+			}
 		}
 		mu.Unlock()
+		<-ticker.C
 	}
 }
 
@@ -361,9 +374,6 @@ func startCurrentNodeChecker() {
 	for range ticker.C {
 		mu.Lock()
 		delay := testNode(gCurrent)
-		if delay != -1 {
-			log.Printf("当前节点: %s, 延迟: %d", gCurrent.Name, delay)
-		}
 		if delay == -1 || delay > gConfig.LatencyThreshold*2 {
 			if gBest == nil || gBest == gCurrent {
 				log.Printf("当前节点不可用，切换到最优节点")
@@ -387,15 +397,26 @@ func startCurrentNodeChecker() {
 }
 
 func main() {
-	var err error
-	gConfig, err = loadConfig("config.yml")
-	if err != nil {
-		log.Fatalf("加载配置失败: %v", err)
+	var configPath string
+
+	var rootCmd = &cobra.Command{
+		Use:   "autoclash",
+		Short: "autoclash 是一个用于自动选择和切换 ClashX 节点的工具",
+		Run: func(cmd *cobra.Command, args []string) {
+			var err error
+			gConfig, err = loadConfig(configPath)
+			if err != nil {
+				log.Fatalf("加载配置失败: %v", err)
+			}
+
+			go startNodeUpdater()
+			go startBestNodeSelector()
+			go startCurrentNodeChecker()
+
+			select {} // 阻塞主协程
+		},
 	}
 
-	go startNodeUpdater()
-	go startBestNodeSelector()
-	go startCurrentNodeChecker()
-
-	select {} // 阻塞主协程
+	rootCmd.Flags().StringVarP(&configPath, "config", "c", "config.yml", "配置文件路径")
+	rootCmd.Execute()
 }

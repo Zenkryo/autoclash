@@ -51,6 +51,18 @@ latency_threshold: 250                 # 延迟阈值（毫秒）
    go run main.go
    ```
 
+4. 也可以指定配置文件路径运行程序：
+
+   ```sh
+   go run main.go -c /path/to/your/config.yml
+   ```
+
+5. 显示帮助信息：
+
+   ```sh
+   go run main.go -h
+   ```
+
 ## 主要函数
 
 - `loadConfig(filePath string) (*Config, error)`：加载配置文件。
