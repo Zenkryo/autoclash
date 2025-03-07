@@ -185,6 +185,7 @@ func testNode(node *ProxyNode) int {
 	if node == nil {
 		return -1
 	}
+	// log.Println("测试节点: ", node.Name)
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/proxies/%s/delay?url=%s&timeout=5000", gConfig.APIEndpoint, node.Name, gConfig.TestURL), nil)
 	if err != nil {
@@ -319,26 +320,29 @@ func selectFastestNode() (*ProxyNode, error) {
 func startNodeUpdater() {
 	ticker := time.NewTicker(time.Duration(gConfig.RetrieveInterval) * time.Second)
 	defer ticker.Stop()
+	toUpdate := false
 	for {
 		mu.Lock()
-		nodes, current, err := getNodes()
-		if err != nil {
-			log.Printf("更新节点列表失败: %v", err)
-			mu.Unlock()
-			time.Sleep(10 * time.Second)
-			continue
+		if len(gNodes) == 0 || toUpdate {
+			log.Println("开始更新节点列表")
+			nodes, current, err := getNodes()
+			if err != nil {
+				log.Printf("更新节点列表失败: %v", err)
+			} else {
+				log.Println("更新节点列表成功")
+				gNodes = nodes
+				gCurrent = current
+			}
+			if len(gNodes) == 0 {
+				mu.Unlock()
+				time.Sleep(10 * time.Second)
+				continue
+			}
 		}
-		if len(nodes) == 0 {
-			log.Println("节点列表为空，立即重试")
-			mu.Unlock()
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		log.Println("更新节点列表成功")
-		gNodes = nodes
-		gCurrent = current
 		mu.Unlock()
+		toUpdate = false
 		<-ticker.C
+		toUpdate = true
 	}
 }
 
@@ -346,23 +350,28 @@ func startNodeUpdater() {
 func startBestNodeSelector() {
 	ticker := time.NewTicker(time.Duration(gConfig.BestInterval) * time.Second)
 	defer ticker.Stop()
+	toUpdate := false
 	for {
 		mu.Lock()
-		if len(gNodes) > 0 && gBest == nil {
-			log.Println("最优节点为空，立即选择最优节点")
+		if len(gNodes) > 0 && gBest == nil || toUpdate {
+			log.Println("开始查找最优节点")
 			bestNode, err := selectFastestNode()
 			if err != nil {
-				log.Printf("选择最优节点失败: %v", err)
-				mu.Unlock()
-				time.Sleep(10 * time.Second)
-				continue
+				log.Printf("查找最优节点失败: %v", err)
 			} else {
 				gBest = bestNode
 				log.Printf("最优节点: %s, 延迟: %d", bestNode.Name, bestNode.Latency)
 			}
+			if len(gNodes) > 0 && gBest == nil {
+				mu.Unlock()
+				time.Sleep(10 * time.Second)
+				continue
+			}
 		}
 		mu.Unlock()
+		toUpdate = false
 		<-ticker.C
+		toUpdate = true
 	}
 }
 
@@ -371,28 +380,45 @@ func startCurrentNodeChecker() {
 	var err error
 	ticker := time.NewTicker(time.Duration(gConfig.CurrentInterval) * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
 		mu.Lock()
-		delay := testNode(gCurrent)
-		if delay == -1 || delay > gConfig.LatencyThreshold*2 {
-			if gBest == nil || gBest == gCurrent {
-				log.Printf("当前节点不可用，切换到最优节点")
-				gBest, err = selectFastestNode()
+		if gCurrent == nil {
+			if gBest != nil {
+				log.Println("切换当前节点到最优节点")
+				err = switchNode(gBest)
 				if err != nil {
-					log.Printf("选择最优节点失败: %v", err)
+					log.Printf("切换当前节点失败: %v", err)
 					mu.Unlock()
+					time.Sleep(10 * time.Second)
 					continue
 				}
-			}
-			err = switchNode(gBest)
-			if err != nil {
-				log.Printf("切换节点失败: %v", err)
-			} else {
-				log.Printf("切换节点成功: %s", gBest.Name)
+				log.Printf("切换当前节点成功: %s", gBest.Name)
 				gCurrent = gBest
+			} else {
+				log.Println("没有最优节点")
+				mu.Unlock()
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			mu.Unlock()
+			continue
+		}
+		if gCurrent != nil && gBest != nil && gCurrent != gBest {
+			log.Printf("检查当前节点: %s", gCurrent.Name)
+			delay := testNode(gCurrent)
+			if delay == -1 || delay > gConfig.LatencyThreshold*2 {
+				log.Printf("当前节点不可用，切换到最优节点")
+				err = switchNode(gBest)
+				if err != nil {
+					log.Printf("切换当前节点失败: %v", err)
+				} else {
+					log.Printf("切换当前节点成功: %s", gBest.Name)
+					gCurrent = gBest
+				}
 			}
 		}
 		mu.Unlock()
+		<-ticker.C
 	}
 }
 
