@@ -322,6 +322,7 @@ func startNodeUpdater() {
 	defer ticker.Stop()
 	toUpdate := false
 	for {
+		log.Println("等待更新节点列表")
 		mu.Lock()
 		if len(gNodes) == 0 || toUpdate {
 			log.Println("开始更新节点列表")
@@ -352,6 +353,7 @@ func startBestNodeSelector() {
 	defer ticker.Stop()
 	toUpdate := false
 	for {
+		log.Println("等待选择最优节点")
 		mu.Lock()
 		if len(gNodes) > 0 && gBest == nil || toUpdate {
 			log.Println("开始查找最优节点")
@@ -381,6 +383,7 @@ func startCurrentNodeChecker() {
 	ticker := time.NewTicker(time.Duration(gConfig.CurrentInterval) * time.Second)
 	defer ticker.Stop()
 	for {
+		log.Println("等待检查当前节点")
 		mu.Lock()
 		if gCurrent == nil {
 			if gBest != nil {
@@ -401,6 +404,7 @@ func startCurrentNodeChecker() {
 				continue
 			}
 			mu.Unlock()
+			time.Sleep(10 * time.Second)
 			continue
 		}
 		if gCurrent != nil && gBest != nil && gCurrent != gBest {
@@ -415,6 +419,8 @@ func startCurrentNodeChecker() {
 					log.Printf("切换当前节点成功: %s", gBest.Name)
 					gCurrent = gBest
 				}
+			} else {
+				log.Printf("当前节点可用，延迟: %d", delay)
 			}
 		}
 		mu.Unlock()
