@@ -32,6 +32,8 @@ latency_threshold: 250                 # 延迟阈值（毫秒）
 
 ## 使用方法
 
+### 本地运行
+
 1. 克隆项目到本地：
 
    ```sh
@@ -61,6 +63,46 @@ latency_threshold: 250                 # 延迟阈值（毫秒）
 
    ```sh
    go run main.go -h
+   ```
+
+### Docker 部署
+
+1. 构建 Docker 镜像：
+
+   ```sh
+   docker build -t autoclash .
+   ```
+
+2. 运行 Docker 容器：
+
+   ```sh
+   docker run -d -v /path/to/config.yml:/app/config.yml --name autoclash autoclash
+   ```
+
+3. 停止 Docker 容器：
+
+   ```sh
+   docker stop autoclash
+   ```
+
+4. 删除 Docker 容器：
+
+   ```sh
+   docker rm autoclash
+   ```
+
+### Docker Compose 部署
+
+1. 启动服务：
+
+   ```sh
+   docker-compose up -d
+   ```
+
+2. 停止服务：
+
+   ```sh
+   docker-compose down
    ```
 
 ## 主要函数
