@@ -12,3 +12,4 @@ services:
     environment:
       - AUTOCLASH_APIENDPOINT=http://192.168.10.2:9090
       - AUTOCLASH_APIKEY=gbU-k7v-r9B-hUy
+      - TZ=Asia/Shanghai
