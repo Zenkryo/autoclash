@@ -393,6 +393,7 @@ func startCurrentNodeChecker() {
 		log.Println("C 等待检查当前节点")
 		mu.Lock()
 		if gCurrent == nil {
+			log.Println("C 当前节点为空")
 			if gBest != nil {
 				log.Println("C 切换当前节点到最优节点")
 				err = switchNode(gBest)
@@ -407,13 +408,13 @@ func startCurrentNodeChecker() {
 				mu.Unlock()
 				time.Sleep(10 * time.Second)
 				continue
+			} else {
+				log.Println("C 没有最优节点")
+				mu.Unlock()
+				time.Sleep(10 * time.Second)
+				continue
 			}
-			log.Println("C 没有最优节点")
-			mu.Unlock()
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		if gCurrent != nil && gBest != nil && gCurrent != gBest {
+		} else if gBest != nil && gCurrent != gBest {
 			log.Printf("D 检查当前节点: %s", gCurrent.Name)
 			delay := testNode(gCurrent)
 			if delay == -1 || delay > gConfig.LatencyThreshold*2 {
@@ -428,6 +429,10 @@ func startCurrentNodeChecker() {
 			} else {
 				log.Printf("D 当前节点可用，延迟: %d", delay)
 			}
+		} else if gBest == nil {
+			log.Println("D 没有最优节点")
+		} else if gCurrent == gBest {
+			log.Println("D 当前节点和最优节点相同")
 		}
 		mu.Unlock()
 		<-ticker.C

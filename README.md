@@ -47,10 +47,10 @@ latency_threshold: 250                 # 延迟阈值（毫秒）
    nano config.yml
    ```
 
-3. 运行程序：
+3. 编译程序：
 
    ```sh
-   go run main.go
+   CGO_ENABLED=0 go build
    ```
 
 4. 也可以指定配置文件路径运行程序：
